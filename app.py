@@ -452,45 +452,6 @@ def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
     )
     r.insert(3, "Nivel de la ruta", nivel.map(NIVEL_RUTA))
     return r.sort_values("Dependientes", ascending=False)
-
-
-def mapa_rutas(d: pd.DataFrame, col_ruta: str) -> go.Figure:
-    """Dibuja cada ruta como recorrido CEDIS → clientes → CEDIS (rutas digitales solo como puntos)."""
-    d = d.copy()
-    d["ANG"] = np.arctan2(d["LAT"] - d["CEDIS_LAT"], d["LON"] - d["CEDIS_LON"])
-    paleta = px.colors.qualitative.Bold + px.colors.qualitative.Safe
-    fig = go.Figure()
-    for i, (ruta, g) in enumerate(d.groupby(col_ruta)):
-        g = orden_recorrido(g)
-        color = paleta[i % len(paleta)]
-        if not str(ruta).endswith("Digital"):
-            clat, clon = g["CEDIS_LAT"].iloc[0], g["CEDIS_LON"].iloc[0]
-            fig.add_trace(go.Scattermap(
-                lat=[clat] + g["LAT"].tolist() + [clat], lon=[clon] + g["LON"].tolist() + [clon],
-                mode="lines", line=dict(width=3, color=color), name=str(ruta), legendgroup=str(ruta),
-                hoverinfo="skip",
-            ))
-        fig.add_trace(go.Scattermap(
-            lat=g["LAT"], lon=g["LON"], mode="markers", legendgroup=str(ruta),
-            showlegend=str(ruta).endswith("Digital"), name=str(ruta),
-            marker=dict(size=13, color=g["SEGMENT"].map(COLORES)),
-            text=g["CLIENTE"] + "<br>" + g["SEGMENT"] + "<br>Ruta: " + str(ruta),
-            hovertemplate="%{text}<extra></extra>",
-        ))
-    cedis = d.drop_duplicates("CEDISID")
-    fig.add_trace(go.Scattermap(
-        lat=cedis["CEDIS_LAT"], lon=cedis["CEDIS_LON"], mode="markers+text", name="CEDIS",
-        marker=dict(size=18, color=TINTA), text=cedis["CEDISID"], textposition="top right",
-        hovertemplate="%{text}<extra></extra>",
-    ))
-    fig.update_layout(
-        map=dict(style="carto-positron", center=dict(lat=d["LAT"].mean(), lon=d["LON"].mean()),
-                 zoom=zoom_para(d["LAT"], d["LON"])),
-        margin=dict(t=0, b=0, l=0, r=0), height=520, legend=dict(title="Rutas"),
-    )
-    return fig
-
-
 # ──────────────────────────────────────────────────────────────
 # Lista de trabajo: riesgo, protocolo y acción por tienda
 # ──────────────────────────────────────────────────────────────
