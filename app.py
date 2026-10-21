@@ -1,3 +1,4 @@
+App · PY
 """
 Radar de Autonomía Tuali · Arca Continental · Equipo 5
 Niveles de autonomía digital con PCA + GMM
@@ -418,20 +419,6 @@ def zoom_para(lat: pd.Series, lon: pd.Series) -> float:
     return float(np.clip(np.log2(360 / extension) - 1.2, 3, 14))
  
  
-def orden_recorrido(g: pd.DataFrame) -> pd.DataFrame:
-    """Ordena los clientes de una ruta por vecino más cercano, saliendo del CEDIS."""
-    pendientes = g.copy()
-    lat, lon = g["CEDIS_LAT"].iloc[0], g["CEDIS_LON"].iloc[0]
-    orden = []
-    while len(pendientes):
-        dist = (pendientes["LAT"] - lat) ** 2 + ((pendientes["LON"] - lon) * np.cos(np.radians(lat))) ** 2
-        siguiente = dist.idxmin()
-        orden.append(siguiente)
-        lat, lon = pendientes.loc[siguiente, ["LAT", "LON"]]
-        pendientes = pendientes.drop(siguiente)
-    return g.loc[orden]
- 
- 
 def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
     """Una fila por ruta con su mezcla de niveles y nivel de la ruta."""
     r = d.groupby(["ROUTEID", "CEDISID", "STATE"]).agg(
@@ -446,43 +433,6 @@ def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
                    labels=["Autónomo", "Semi autónomo", "Dependiente"]).astype(str)
     r.insert(3, "Nivel de la ruta", nivel.map(NIVEL_RUTA))
     return r.sort_values("Dependientes", ascending=False)
- 
- 
-def mapa_rutas(d: pd.DataFrame, col_ruta: str) -> go.Figure:
-    """Dibuja cada ruta como recorrido CEDIS → clientes → CEDIS (rutas digitales solo como puntos)."""
-    d = d.copy()
-    d["ANG"] = np.arctan2(d["LAT"] - d["CEDIS_LAT"], d["LON"] - d["CEDIS_LON"])
-    paleta = px.colors.qualitative.Bold + px.colors.qualitative.Safe
-    fig = go.Figure()
-    for i, (ruta, g) in enumerate(d.groupby(col_ruta)):
-        g = orden_recorrido(g)
-        color = paleta[i % len(paleta)]
-        if not str(ruta).endswith("Digital"):
-            clat, clon = g["CEDIS_LAT"].iloc[0], g["CEDIS_LON"].iloc[0]
-            fig.add_trace(go.Scattermap(
-                lat=[clat] + g["LAT"].tolist() + [clat], lon=[clon] + g["LON"].tolist() + [clon],
-                mode="lines", line=dict(width=3, color=color), name=str(ruta), legendgroup=str(ruta),
-                hoverinfo="skip",
-            ))
-        fig.add_trace(go.Scattermap(
-            lat=g["LAT"], lon=g["LON"], mode="markers", legendgroup=str(ruta),
-            showlegend=str(ruta).endswith("Digital"), name=str(ruta),
-            marker=dict(size=13, color=g["SEGMENT"].map(COLORES)),
-            text=g["CLIENTE"] + "<br>" + g["SEGMENT"] + "<br>Ruta: " + str(ruta),
-            hovertemplate="%{text}<extra></extra>",
-        ))
-    cedis = d.drop_duplicates("CEDISID")
-    fig.add_trace(go.Scattermap(
-        lat=cedis["CEDIS_LAT"], lon=cedis["CEDIS_LON"], mode="markers+text", name="CEDIS",
-        marker=dict(size=18, color=TINTA), text=cedis["CEDISID"], textposition="top right",
-        hovertemplate="%{text}<extra></extra>",
-    ))
-    fig.update_layout(
-        map=dict(style="carto-positron", center=dict(lat=d["LAT"].mean(), lon=d["LON"].mean()),
-                 zoom=zoom_para(d["LAT"], d["LON"])),
-        margin=dict(t=0, b=0, l=0, r=0), height=520, legend=dict(title="Rutas"),
-    )
-    return fig
  
  
 # ──────────────────────────────────────────────────────────────
@@ -751,8 +701,7 @@ with tab_mapa:
         st.plotly_chart(fig, width="stretch")
         n_real = int(dff["COORD_REAL"].sum())
         if n_real == len(dff):
-            st.caption("📍 Ubicación real de cada cliente (latitud y longitud de la base). "
-                       "Cada CEDIS se ubica en el centro de sus clientes.")
+            st.caption("📍 Ubicación real de cada cliente (latitud y longitud de la base).")
         elif n_real > 0:
             st.caption(f"📍 {n_real} de {len(dff)} clientes con ubicación real; el resto sin coordenadas se ubica "
                        "de forma aproximada cerca de su CEDIS y su ruta.")
@@ -783,22 +732,6 @@ with tab_mapa:
         ),
         width="stretch", hide_index=True, height=320,
     )
- 
-    with st.container(border=True):
-        st.markdown("**Ver rutas en el mapa**")
-        cedis_sel = st.selectbox("CEDIS", sorted(dff["CEDISID"].unique()), key="mapa_cedis")
-        d_cedis = dff[dff["CEDISID"] == cedis_sel]
-        c_map, c_tab = st.columns([1.6, 1])
-        with c_map:
-            st.plotly_chart(mapa_rutas(d_cedis, "ROUTEID"), width="stretch")
-        with c_tab:
-            detalle = (d_cedis.groupby("ROUTEID")["SEGMENT"].value_counts().unstack(fill_value=0)
-                       .reindex(columns=ORDEN, fill_value=0))
-            detalle["Total"] = detalle.sum(axis=1)
-            st.markdown(f"**Rutas en {cedis_sel}**")
-            st.dataframe(detalle, width="stretch")
-            st.caption("Los puntos se colorean por nivel; las líneas muestran el recorrido CEDIS → clientes → CEDIS, "
-                       "visitando siempre al cliente más cercano.")
  
 # ──────────────────────────────────────────────────────────────
 # 3. Ficha del cliente
