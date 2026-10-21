@@ -1,16 +1,16 @@
 """
 Radar de Autonomía Tuali · Arca Continental · Equipo 5
 Niveles de autonomía digital con PCA + GMM
-
+ 
 Cómo correrlo (terminal de VS Code, dentro de la carpeta del proyecto):
     python -m streamlit run app.py
-
+ 
 La base de datos (Excel o CSV) se sube desde la barra lateral.
 """
-
+ 
 import re
 from pathlib import Path
-
+ 
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -19,13 +19,13 @@ import streamlit as st
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
-
+ 
 # ──────────────────────────────────────────────────────────────
 # Configuración general
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Radar de Autonomía Tuali", page_icon="🏪", layout="wide")
-
-
+ 
+ 
 # Las 7 variables con las que se entrenó el modelo (mismo orden que el notebook)
 VARS = [
     "PROMOTIONRATE",
@@ -36,7 +36,7 @@ VARS = [
     "AVGSESSIONDURATIONSECONDS",
     "FAVORITERATE",
 ]
-
+ 
 NOMBRES = {
     "PROMOTIONRATE": "Uso de promociones",
     "CODESEARCHRATE": "Búsqueda por código",
@@ -47,7 +47,7 @@ NOMBRES = {
     "FAVORITERATE": "Uso de favoritos",
     "COUPLED": "Pedidos acoplados a visita",
 }
-
+ 
 # Qué hacer en la visita cuando esa variable es la mayor brecha contra el autónomo promedio
 PROTOCOLOS = {
     "PROMOTIONRATE": "Mostrar la sección de promociones y cerrar un pedido con promo",
@@ -58,20 +58,20 @@ PROTOCOLOS = {
     "AVGSESSIONDURATIONSECONDS": "Acompañar una sesión de pedido de principio a fin",
     "FAVORITERATE": "Armar su lista de favoritos para repetir pedido en un clic",
 }
-
+ 
 VARS_ENTERAS = {"EVENTCOUNT", "DISTINCTEVENTTYPES", "DISTINCT_PRODUCTS"}
 VARS_TASA = {"PROMOTIONRATE", "CODESEARCHRATE", "FAVORITERATE"}
-
+ 
 ORDEN = ["Autónomo", "Semi autónomo", "Dependiente"]
 COLORES = {"Autónomo": "#3f9a63", "Semi autónomo": "#e0a32e", "Dependiente": "#d0453f"}
 CIRCULO = {"Autónomo": "🟢", "Semi autónomo": "🟡", "Dependiente": "🔴"}
 PLURAL = {"Autónomo": "Autónomos", "Semi autónomo": "Semi autónomos", "Dependiente": "Dependientes"}
 ROJO_ARCA = "#c62828"
 TINTA = "#2b2118"
-
+ 
 # Nivel de una ruta según su % de dependientes
 NIVEL_RUTA = {"Dependiente": "🔴 Dependiente", "Semi autónomo": "🟡 Semi autónoma", "Autónomo": "🟢 Autónoma"}
-
+ 
 DIMENSIONES = {
     "Estado": "STATE",
     "CEDIS": "CEDISID",
@@ -80,16 +80,16 @@ DIMENSIONES = {
     "Tamaño de cliente": "CUSTOMERSIZE",
     "Tipo de negocio": "BUSINESSTYPE",
 }
-
-
+ 
+ 
 # ──────────────────────────────────────────────────────────────
 # Estilo
 # ──────────────────────────────────────────────────────────────
 def html(codigo: str, donde=st):
     """Escribe HTML en una sola línea (evita que Streamlit lo tome como bloque de código)."""
     donde.markdown(re.sub(r"\s*\n\s*", " ", codigo), unsafe_allow_html=True)
-
-
+ 
+ 
 html(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
@@ -134,8 +134,8 @@ h1, h2, h3, .stApp h1, .stApp h2, .stApp h3 {{font-family: 'Fraunces', Georgia, 
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{display: none;}}
 </style>
 """)
-
-
+ 
+ 
 def tienda_svg(color: str, tam: int = 40, cuerpo: str = "#ffffff") -> str:
     """Ícono de tiendita (toldo, letrero, ventanas y puerta) del color indicado."""
     festones = "".join(f"<circle cx='{x}' cy='24' r='4' fill='{color}'/>" for x in range(8, 60, 8))
@@ -149,8 +149,8 @@ def tienda_svg(color: str, tam: int = 40, cuerpo: str = "#ffffff") -> str:
         f"<rect x='38' y='34' width='11' height='10' rx='1.5' fill='{color}' opacity='.35'/>"
         f"<rect x='27' y='39' width='10' height='20' rx='1.5' fill='{color}'/></svg>"
     )
-
-
+ 
+ 
 def tarjeta(col, titulo, valor, sub="", color=ROJO_ARCA, icono=None):
     icono_html = f"<div>{icono}</div>" if icono else ""
     html(
@@ -158,8 +158,8 @@ def tarjeta(col, titulo, valor, sub="", color=ROJO_ARCA, icono=None):
         f"<div class='card-v'>{valor}</div><div class='card-s'>{sub}</div></div>{icono_html}</div>",
         col,
     )
-
-
+ 
+ 
 def medidor(valor: float, cortes: tuple, titulo: str = "", alto: int = 230) -> go.Figure:
     """Velocímetro del IAD (0–10) con franjas de color por nivel."""
     fig = go.Figure(go.Indicator(
@@ -181,34 +181,34 @@ def medidor(valor: float, cortes: tuple, titulo: str = "", alto: int = 230) -> g
                        font=dict(size=44 if alto >= 260 else 34, family="Fraunces, serif", color=TINTA))
     fig.update_layout(height=alto, margin=dict(t=40, b=10, l=30, r=30))
     return fig
-
-
+ 
+ 
 def restablecer(valores: dict):
     """Regresa los controles a su valor inicial (se usa en los botones ↺ Restablecer)."""
     for clave, valor in valores.items():
         st.session_state[clave] = valor
-
-
+ 
+ 
 def iniciar(valores: dict):
     """Pone el valor inicial de cada control solo la primera vez."""
     for clave, valor in valores.items():
         st.session_state.setdefault(clave, valor)
-
-
+ 
+ 
 # ──────────────────────────────────────────────────────────────
 # Datos y modelo
 # ──────────────────────────────────────────────────────────────
 # Nombres aceptados para las columnas de coordenadas del cliente
 ALIAS_LAT = ["LATITUDE", "LATITUD", "LAT", "CUSTOMERLATITUDE", "LATITUD_CLIENTE"]
 ALIAS_LON = ["LONGITUDE", "LONGITUD", "LON", "LNG", "LONG", "CUSTOMERLONGITUDE", "LONGITUD_CLIENTE"]
-
+ 
 # Columnas opcionales: si la base no las trae, se rellenan para que el dashboard funcione igual
 OPCIONALES = {
     "SUBCHANNEL": "Sin dato", "ROUTEID": "Sin ruta", "CEDISID": "Sin CEDIS", "STATE": "Sin estado",
     "CITY": "Sin dato", "JOINDATE": "", "CUSTOMERSIZE": "Sin dato", "BUSINESSTYPE": "Sin dato",
 }
-
-
+ 
+ 
 @st.cache_data
 def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
     """Lee cualquier Excel (.xlsx) o CSV, sin importar el nombre del archivo."""
@@ -220,8 +220,8 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
             except UnicodeDecodeError:
                 continue
     return pd.read_excel(BytesIO(contenido))
-
-
+ 
+ 
 def preparar_datos(crudo: pd.DataFrame):
     """Normaliza nombres de columnas y rellena las opcionales. Regresa (df, columnas_faltantes)."""
     df = crudo.copy()
@@ -257,8 +257,8 @@ def preparar_datos(crudo: pd.DataFrame):
         df["LAT_REAL"] = np.nan
         df["LON_REAL"] = np.nan
     return df, []
-
-
+ 
+ 
 @st.cache_resource
 def entrenar_modelo(df: pd.DataFrame):
     """Pipeline del notebook: StandardScaler → PCA(3) → GMM(3), entrenado con la base que se subió."""
@@ -271,7 +271,7 @@ def entrenar_modelo(df: pd.DataFrame):
         n_components=3, covariance_type="full", reg_covar=0.01, n_init=10, random_state=42
     ).fit(X)
     clusters = gmm.predict(X)
-
+ 
     # Nombre de cada grupo según su comportamiento: más promociones, favoritos, productos, sesión y
     # eventos, y menos búsqueda por código = más autónomo. (Coincide 100% con el notebook.)
     zd = pd.DataFrame(Z, columns=VARS)
@@ -279,7 +279,7 @@ def entrenar_modelo(df: pd.DataFrame):
                    "EVENTCOUNT"]].mean(axis=1) - zd["CODESEARCHRATE"])
     orden = puntaje.groupby(clusters).mean().sort_values().index
     mapa = {orden[0]: "Dependiente", orden[1]: "Semi autónomo", orden[2]: "Autónomo"}
-
+ 
     return {
         "scaler": scaler,
         "pca": pca,
@@ -292,8 +292,8 @@ def entrenar_modelo(df: pd.DataFrame):
         # Peso de cada variable en el IAD = carga al cuadrado en el primer componente (suman 1)
         "pesos": pd.Series(pca.components_[0] ** 2, index=VARS),
     }
-
-
+ 
+ 
 def predecir(modelo, valores: dict) -> pd.Series:
     """Probabilidad de pertenecer a cada segmento para un cliente (dict variable → valor)."""
     x = np.array([[valores[v] for v in VARS]])
@@ -301,8 +301,8 @@ def predecir(modelo, valores: dict) -> pd.Series:
     proba = modelo["gmm"].predict_proba(z)[0]
     s = pd.Series({modelo["mapa"][i]: p for i, p in enumerate(proba)})
     return s.reindex(ORDEN)
-
-
+ 
+ 
 @st.cache_data
 def calcular_indices(df: pd.DataFrame, _pesos: pd.Series) -> pd.DataFrame:
     """Puntaje 0–10 por variable (percentil, orientado para que más alto = más autónomo)
@@ -314,19 +314,19 @@ def calcular_indices(df: pd.DataFrame, _pesos: pd.Series) -> pd.DataFrame:
         df[f"P_{v}"] = (signo * df[v]).rank(pct=True) * 10
     df["IAD"] = sum(df[f"P_{v}"] * _pesos[v] for v in VARS)
     return df
-
-
+ 
+ 
 def variables_invertidas(df: pd.DataFrame) -> set:
     medias = df.groupby("SEGMENT")[VARS].mean()
     return {v for v in VARS if medias.loc["Autónomo", v] < medias.loc["Dependiente", v]}
-
-
+ 
+ 
 def normalizar(df_vals: pd.DataFrame, base: pd.DataFrame) -> pd.DataFrame:
     """Escala min–max (0 = mínimo de la base, 1 = máximo) para comparar variables en el radar."""
     mn, mx = base[VARS].min(), base[VARS].max()
     return ((df_vals[VARS] - mn) / (mx - mn)).clip(0, 1)
-
-
+ 
+ 
 def radar(perfiles: dict, titulo: str = "", rango=(0, 1), etiquetas=None) -> go.Figure:
     """perfiles: nombre → Serie indexada por VARS."""
     etiquetas = etiquetas or [NOMBRES[v] for v in VARS]
@@ -349,8 +349,8 @@ def radar(perfiles: dict, titulo: str = "", rango=(0, 1), etiquetas=None) -> go.
         legend=dict(orientation="h", y=-0.12), margin=dict(t=50, b=40, l=60, r=60), height=480,
     )
     return fig
-
-
+ 
+ 
 def cien_tiendas(conteo: pd.Series) -> list:
     """Reparte 100 íconos entre niveles en proporción a los clientes (método del mayor residuo)."""
     exacto = conteo / conteo.sum() * 100
@@ -359,8 +359,8 @@ def cien_tiendas(conteo: pd.Series) -> list:
     for s in (exacto - n).sort_values(ascending=False).index[:faltan]:
         n[s] += 1
     return [s for s in ORDEN for _ in range(n[s])]
-
-
+ 
+ 
 # ──────────────────────────────────────────────────────────────
 # Mapa y rutas
 # ──────────────────────────────────────────────────────────────
@@ -370,8 +370,8 @@ ANCLAS = {
     "Coahuila": [(25.42, -101.00), (25.54, -103.41), (26.90, -101.42), (28.70, -100.52)],
     "Jalisco": [(20.67, -103.35), (20.65, -105.22), (21.36, -101.93), (19.70, -103.46)],
 }
-
-
+ 
+ 
 @st.cache_data
 def agregar_coordenadas(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega LAT/LON por cliente y CEDIS_LAT/CEDIS_LON.
@@ -380,7 +380,7 @@ def agregar_coordenadas(df: pd.DataFrame) -> pd.DataFrame:
     - Si no, se generan posiciones aproximadas: cada CEDIS en una ciudad de su estado y cada cliente
       alrededor del centro de su ruta."""
     df = df.copy()
-
+ 
     # Posiciones aproximadas (respaldo para clientes sin coordenadas)
     pos_cedis = {}
     cedis_estado = df.groupby("CEDISID")["STATE"].first()
@@ -399,25 +399,25 @@ def agregar_coordenadas(df: pd.DataFrame) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     aprox_lat = df["ROUTEID"].map(lambda r: centros[r][0]) + rng.normal(0, 0.02, len(df))
     aprox_lon = df["ROUTEID"].map(lambda r: centros[r][1]) + rng.normal(0, 0.02, len(df))
-
+ 
     # Coordenadas reales cuando existen
     df["COORD_REAL"] = df["LAT_REAL"].notna() & df["LON_REAL"].notna()
     df["LAT"] = df["LAT_REAL"].where(df["COORD_REAL"], aprox_lat)
     df["LON"] = df["LON_REAL"].where(df["COORD_REAL"], aprox_lon)
-
+ 
     # CEDIS: centro de sus clientes con coordenadas reales; si no tiene ninguno, la posición aproximada
     centro_real = df[df["COORD_REAL"]].groupby("CEDISID")[["LAT", "LON"]].mean()
     df["CEDIS_LAT"] = df["CEDISID"].map(centro_real["LAT"]).fillna(aprox_cedis_lat)
     df["CEDIS_LON"] = df["CEDISID"].map(centro_real["LON"]).fillna(aprox_cedis_lon)
     return df
-
-
+ 
+ 
 def zoom_para(lat: pd.Series, lon: pd.Series) -> float:
     """Zoom del mapa para que quepan todos los puntos."""
     extension = max(lat.max() - lat.min(), lon.max() - lon.min(), 0.005)
     return float(np.clip(np.log2(360 / extension) - 1.2, 3, 14))
-
-
+ 
+ 
 def orden_recorrido(g: pd.DataFrame) -> pd.DataFrame:
     """Ordena los clientes de una ruta por vecino más cercano, saliendo del CEDIS."""
     pendientes = g.copy()
@@ -430,10 +430,10 @@ def orden_recorrido(g: pd.DataFrame) -> pd.DataFrame:
         lat, lon = pendientes.loc[siguiente, ["LAT", "LON"]]
         pendientes = pendientes.drop(siguiente)
     return g.loc[orden]
-
-
+ 
+ 
 def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
-    """Una fila por ruta con su mezcla de niveles, nivel de la ruta y estrategia sugerida."""
+    """Una fila por ruta con su mezcla de niveles y nivel de la ruta."""
     r = d.groupby(["ROUTEID", "CEDISID", "STATE"]).agg(
         Clientes=("CUSTOMERID", "count"),
         Autonomos=("SEGMENT", lambda s: (s == "Autónomo").mean()),
@@ -444,14 +444,47 @@ def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
     nivel = pd.cut(r["Dependientes"], [-0.01, 0.15, 0.30, 1.0],
                    labels=["Autónomo", "Semi autónomo", "Dependiente"]).astype(str)
-    r["Estrategia"] = np.select(
-        [(nivel == "Autónomo") & (r["Autonomos"] >= 0.5), nivel == "Dependiente"],
-        ["Digital: bajar frecuencia de visita, pedido por Tuali",
-         "Acompañamiento: mantener visita + capacitación en Tuali"],
-        default="Impulso: visitas de capacitación a semi autónomos",
-    )
     r.insert(3, "Nivel de la ruta", nivel.map(NIVEL_RUTA))
     return r.sort_values("Dependientes", ascending=False)
+ 
+ 
+def mapa_rutas(d: pd.DataFrame, col_ruta: str) -> go.Figure:
+    """Dibuja cada ruta como recorrido CEDIS → clientes → CEDIS (rutas digitales solo como puntos)."""
+    d = d.copy()
+    d["ANG"] = np.arctan2(d["LAT"] - d["CEDIS_LAT"], d["LON"] - d["CEDIS_LON"])
+    paleta = px.colors.qualitative.Bold + px.colors.qualitative.Safe
+    fig = go.Figure()
+    for i, (ruta, g) in enumerate(d.groupby(col_ruta)):
+        g = orden_recorrido(g)
+        color = paleta[i % len(paleta)]
+        if not str(ruta).endswith("Digital"):
+            clat, clon = g["CEDIS_LAT"].iloc[0], g["CEDIS_LON"].iloc[0]
+            fig.add_trace(go.Scattermap(
+                lat=[clat] + g["LAT"].tolist() + [clat], lon=[clon] + g["LON"].tolist() + [clon],
+                mode="lines", line=dict(width=3, color=color), name=str(ruta), legendgroup=str(ruta),
+                hoverinfo="skip",
+            ))
+        fig.add_trace(go.Scattermap(
+            lat=g["LAT"], lon=g["LON"], mode="markers", legendgroup=str(ruta),
+            showlegend=str(ruta).endswith("Digital"), name=str(ruta),
+            marker=dict(size=13, color=g["SEGMENT"].map(COLORES)),
+            text=g["CLIENTE"] + "<br>" + g["SEGMENT"] + "<br>Ruta: " + str(ruta),
+            hovertemplate="%{text}<extra></extra>",
+        ))
+    cedis = d.drop_duplicates("CEDISID")
+    fig.add_trace(go.Scattermap(
+        lat=cedis["CEDIS_LAT"], lon=cedis["CEDIS_LON"], mode="markers+text", name="CEDIS",
+        marker=dict(size=18, color=TINTA), text=cedis["CEDISID"], textposition="top right",
+        hovertemplate="%{text}<extra></extra>",
+    ))
+    fig.update_layout(
+        map=dict(style="carto-positron", center=dict(lat=d["LAT"].mean(), lon=d["LON"].mean()),
+                 zoom=zoom_para(d["LAT"], d["LON"])),
+        margin=dict(t=0, b=0, l=0, r=0), height=520, legend=dict(title="Rutas"),
+    )
+    return fig
+ 
+ 
 # ──────────────────────────────────────────────────────────────
 # Lista de trabajo: riesgo, protocolo y acción por tienda
 # ──────────────────────────────────────────────────────────────
@@ -460,7 +493,7 @@ def lista_trabajo(d: pd.DataFrame, base: pd.DataFrame) -> pd.DataFrame:
     meta = base[base["SEGMENT"] == "Autónomo"][[f"P_{v}" for v in VARS]].mean()
     brechas = pd.DataFrame({v: meta[f"P_{v}"] - d[f"P_{v}"] for v in VARS})
     d["BRECHA_PRINCIPAL"] = brechas.idxmax(axis=1)
-
+ 
     no_autonomo = d["SEGMENT"] != "Autónomo"
     d["RIESGO"] = np.select(
         [
@@ -497,8 +530,8 @@ def lista_trabajo(d: pd.DataFrame, base: pd.DataFrame) -> pd.DataFrame:
     orden_riesgo = d["RIESGO"].map({"Alerta": 0, "Vigilar": 1, "—": 2})
     orden_nivel = d["SEGMENT"].map({"Dependiente": 0, "Semi autónomo": 1, "Autónomo": 2})
     return d.assign(_r=orden_riesgo, _c=orden_nivel).sort_values(["_r", "_c", "IAD"]).drop(columns=["_r", "_c"])
-
-
+ 
+ 
 # ──────────────────────────────────────────────────────────────
 # Carga
 # ──────────────────────────────────────────────────────────────
@@ -514,8 +547,8 @@ def banner(frase: str):
       <div class="tiendas">{tienditas}</div>
     </div>
     """)
-
-
+ 
+ 
 COLUMNAS_AYUDA = (
     "**Obligatorias** (las 7 variables del modelo): "
     + ", ".join(f"`{v}`" for v in VARS)
@@ -524,7 +557,7 @@ COLUMNAS_AYUDA = (
     + ", `LATITUDE` / `LATITUD` y `LONGITUDE` / `LONGITUD` (ubicación real del cliente para el mapa)"
     + "\n\nLos niveles de autonomía y su probabilidad se calculan automáticamente con PCA + GMM."
 )
-
+ 
 # Botón para descargar la guía en PDF (el archivo va en la misma carpeta que app.py)
 GUIA_PDF = Path(__file__).parent / "Guia_Radar_Autonomia_Tuali.pdf"
 if GUIA_PDF.exists():
@@ -544,13 +577,13 @@ if subido is None:
     with st.expander("¿Qué columnas necesita la base?"):
         st.markdown(COLUMNAS_AYUDA)
     st.stop()
-
+ 
 try:
     crudo = leer_archivo(subido.getvalue(), subido.name)
 except Exception:
     st.error("No pude leer el archivo. Revisa que sea un Excel (.xlsx) o un CSV válido.")
     st.stop()
-
+ 
 df, faltan = preparar_datos(crudo)
 if faltan:
     st.error("A tu base le faltan estas columnas: " + ", ".join(f"`{c}`" for c in faltan))
@@ -559,7 +592,7 @@ if faltan:
 if len(df) < 30:
     st.error(f"La base tiene {len(df)} clientes con datos completos; se necesitan al menos 30 para el modelo.")
     st.stop()
-
+ 
 modelo = entrenar_modelo(df)
 df["SEGMENT"] = modelo["segmentos"]
 df["PROB_MAX"] = modelo["prob_max"]
@@ -569,11 +602,11 @@ HAY_ACOPLE = df["COUPLED"].notna().any()
 df = agregar_coordenadas(df)
 df = calcular_indices(df, modelo["pesos"])
 INVERTIDAS = variables_invertidas(df)
-
+ 
 # Cortes del medidor IAD: punto medio entre los promedios de cada nivel
 _m = df.groupby("SEGMENT")["IAD"].mean()
 CORTES = ((_m["Dependiente"] + _m["Semi autónomo"]) / 2, (_m["Semi autónomo"] + _m["Autónomo"]) / 2)
-
+ 
 # ──────────────────────────────────────────────────────────────
 # Filtros
 # ──────────────────────────────────────────────────────────────
@@ -584,27 +617,27 @@ filtros = {}
 for etiqueta, col in DIMENSIONES.items():
     opciones = sorted(df[col].dropna().unique())
     filtros[col] = st.sidebar.multiselect(etiqueta, opciones, placeholder="Todos", key=f"filtro_{col}")
-
+ 
 dff = df.copy()
 for col, seleccion in filtros.items():
     if seleccion:
         dff = dff[dff[col].isin(seleccion)]
-
+ 
 st.sidebar.caption(f"Mostrando **{len(dff)}** de {len(df)} clientes.")
-
+ 
 if dff.empty:
     st.warning("Ningún cliente cumple con los filtros seleccionados.")
     st.stop()
-
+ 
 # ──────────────────────────────────────────────────────────────
 # Encabezado y KPIs
 # ──────────────────────────────────────────────────────────────
 conteo = dff["SEGMENT"].value_counts().reindex(ORDEN, fill_value=0)
 pct = conteo / conteo.sum() * 100
-
+ 
 banner(f"{pct['Autónomo']:.1f}% de los clientes ya pide solo por Tuali; "
        f"{pct['Dependiente']:.1f}% todavía depende del preventista.")
-
+ 
 acople_seg = dff.groupby("SEGMENT")["COUPLED"].mean().reindex(ORDEN)
 k1, k2, k3, k4 = st.columns(4)
 for col, s in zip([k1, k2, k3], ORDEN):
@@ -618,12 +651,12 @@ if acople_seg.notna().all():
 else:
     tarjeta(k4, "Pedidos pegados a la visita", f"{dff['COUPLED'].mean():.0%}" if HAY_ACOPLE else "Sin dato",
             "Promedio de la vista" if HAY_ACOPLE else "La base no trae la columna COUPLED")
-
+ 
 (tab_res, tab_mapa, tab_ficha, tab_lista, tab_radar, tab_sim, tab_esc) = st.tabs([
     "🏪 Panorama", "🗺️ Mapa y rutas", "🪪 Ficha del cliente", "📋 Lista de trabajo",
     "🕸️ Radar de perfiles", "🧪 Simulador de cliente", "🚀 Escenarios e impacto",
 ])
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 1. Panorama
 # ──────────────────────────────────────────────────────────────
@@ -644,7 +677,7 @@ with tab_res:
             st.plotly_chart(medidor(dff["IAD"].mean(), CORTES, "Índice de Autonomía Digital (0 a 10)", 270),
                             width="stretch")
             st.caption("Más a la derecha = clientes que piden solos por Tuali.")
-
+ 
     st.subheader("El camino a la autonomía")
     pasos = []
     descripciones = {
@@ -662,7 +695,7 @@ with tab_res:
         )
     html(f"<div class='camino'>{pasos[0]}<div class='flecha'>➜</div>{pasos[1]}<div class='flecha'>➜</div>{pasos[2]}</div>")
     st.write("")
-
+ 
     with st.container(border=True):
         st.subheader("Distribución del Índice de Autonomía Digital")
         st.caption("Clientes por puntaje de 0 a 10, apilados por nivel de autonomía.")
@@ -671,7 +704,7 @@ with tab_res:
         fig.update_layout(barmode="stack", bargap=0.08, xaxis=dict(range=[0, 10]), yaxis_title="Clientes",
                           legend=dict(orientation="h", y=1.1, title=None), height=340, margin=dict(t=30))
         st.plotly_chart(fig, width="stretch")
-
+ 
     c1, c2 = st.columns([1, 1.4])
     with c1:
         with st.container(border=True):
@@ -683,7 +716,7 @@ with tab_res:
                               annotations=[dict(text=f"<b>{len(dff)}</b><br>tiendas", showarrow=False,
                                                 font=dict(size=20, family="Fraunces, serif"))])
             st.plotly_chart(fig, width="stretch")
-
+ 
     with c2:
         with st.container(border=True):
             st.subheader("Nivel de autonomía por grupo")
@@ -698,7 +731,7 @@ with tab_res:
             fig.update_layout(barmode="stack", xaxis_ticksuffix="%", legend=dict(orientation="h", y=1.08, title=None),
                               margin=dict(t=30, b=10), height=max(300, 22 * len(orden_dim)))
             st.plotly_chart(fig, width="stretch")
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 2. Mapa y rutas
 # ──────────────────────────────────────────────────────────────
@@ -726,7 +759,7 @@ with tab_mapa:
         else:
             st.caption("Ubicación aproximada: la base no trae latitud y longitud, así que cada cliente se ubica "
                        "cerca de su CEDIS y su ruta.")
-
+ 
     st.subheader("¿Dónde están los dependientes? · Rutas actuales")
     rutas = resumen_rutas(dff)
     s1, s2, s3 = st.columns(3)
@@ -738,19 +771,19 @@ with tab_mapa:
     for col, s in zip([s1, s2, s3], ["Dependiente", "Semi autónomo", "Autónomo"]):
         n = int((rutas["Nivel de la ruta"] == NIVEL_RUTA[s]).sum())
         tarjeta(col, f"Rutas {NIVEL_RUTA[s][2:].lower()}s", n, textos_ruta[s], COLORES[s], tienda_svg(COLORES[s], 50))
-
+ 
     color_por_nivel = {v: COLORES[k] for k, v in NIVEL_RUTA.items()}
-
+ 
     def color_fila(fila):
         return [f"background-color: {color_por_nivel[fila['Nivel de la ruta']]}33"] * len(fila)
-
+ 
     st.dataframe(
         rutas.style.apply(color_fila, axis=1).format(
             {"Autonomos": "{:.0%}", "Semi": "{:.0%}", "Dependientes": "{:.0%}", "IAD": "{:.1f}", "Acoplamiento": "{:.1%}"}
         ),
         width="stretch", hide_index=True, height=320,
     )
-
+ 
     with st.container(border=True):
         st.markdown("**Ver rutas en el mapa**")
         cedis_sel = st.selectbox("CEDIS", sorted(dff["CEDISID"].unique()), key="mapa_cedis")
@@ -766,12 +799,12 @@ with tab_mapa:
             st.dataframe(detalle, width="stretch")
             st.caption("Los puntos se colorean por nivel; las líneas muestran el recorrido CEDIS → clientes → CEDIS, "
                        "visitando siempre al cliente más cercano.")
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 3. Ficha del cliente
 # ──────────────────────────────────────────────────────────────
 trabajo = lista_trabajo(dff, df)
-
+ 
 with tab_ficha:
     nivel_de = trabajo.set_index("CLIENTE")["SEGMENT"]
     cliente = st.selectbox("Buscar tienda o ID", trabajo["CLIENTE"].tolist(), key="ficha_cliente",
@@ -779,7 +812,7 @@ with tab_ficha:
     r = trabajo[trabajo["CLIENTE"] == cliente].iloc[0]
     proba = predecir(modelo, r[VARS].to_dict())
     nivel = r["SEGMENT"]
-
+ 
     f1, f2 = st.columns(2)
     with f1:
         with st.container(border=True):
@@ -798,7 +831,7 @@ with tab_ficha:
                           (f"{r['COUPLED']:.0%} (promedio de su nivel: {nivel_prom:.0%})" if pd.notna(r["COUPLED"]) else "Sin dato"), riesgo_txt],
             })
             st.dataframe(datos, hide_index=True, width="stretch")
-
+ 
     with f2:
         with st.container(border=True):
             st.plotly_chart(medidor(r["IAD"], CORTES, "Índice de Autonomía Digital", 240), width="stretch")
@@ -808,11 +841,11 @@ with tab_ficha:
             fig.update_layout(showlegend=False, xaxis=dict(range=[0, 1], tickformat=".0%", title=None),
                               yaxis=dict(title=None, autorange="reversed"), height=160, margin=dict(t=5, b=5))
             st.plotly_chart(fig, width="stretch")
-
+ 
     a1, a2 = st.columns(2)
     html(f"<div class='accion'><b>📅 {r['ACCION_MES']}</b><span>Acción del mes según su nivel</span></div>", a1)
     html(f"<div class='accion'><b>🤝 {r['PROTOCOLO']}</b><span>Protocolo en la visita del preventista</span></div>", a2)
-
+ 
     f3, f4 = st.columns(2)
     puntajes = {f"P_{v}": v for v in VARS}
     etiquetas = [NOMBRES[v] + (" (inv.)" if v in INVERTIDAS else "") for v in VARS]
@@ -826,7 +859,7 @@ with tab_ficha:
                 "Este cliente": r[list(puntajes)].rename(puntajes).astype(float),
             }
             st.plotly_chart(radar(perf, rango=(0, 10), etiquetas=etiquetas), width="stretch")
-
+ 
     with f4:
         with st.container(border=True):
             st.markdown("**Qué le falta para subir**")
@@ -852,7 +885,7 @@ with tab_ficha:
             idx = ruta_df["CLIENTE"].tolist().index(cliente)
             fig.add_annotation(x=r["IAD"], y=idx, text="◀ esta tienda", showarrow=False, xanchor="left", xshift=6)
             st.plotly_chart(fig, width="stretch")
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 4. Lista de trabajo
 # ──────────────────────────────────────────────────────────────
@@ -866,11 +899,11 @@ with tab_lista:
     tarjeta(l3, "Visitas que se transforman", int((trabajo["SEGMENT"] == "Autónomo").sum()),
             "Tiendas autónomas: auditoría en lugar de captura", COLORES["Autónomo"], tienda_svg(COLORES["Autónomo"], 50))
     tarjeta(l4, "Tiendas en la vista", len(trabajo), "Usa la Ficha del cliente para ver el detalle")
-
+ 
     b1, b2 = st.columns([1.6, 2])
     busqueda = b1.text_input("Buscar tienda", placeholder="Nombre o ID…")
     filtro = b2.radio("Mostrar", ["Todas", "Solo riesgo", "Dependientes", "Semi autónomos", "Autónomos"], horizontal=True)
-
+ 
     vista_l = trabajo
     if busqueda:
         vista_l = vista_l[vista_l["CLIENTE"].str.contains(busqueda, case=False)]
@@ -878,7 +911,7 @@ with tab_lista:
         vista_l = vista_l[vista_l["RIESGO"] != "—"]
     elif filtro != "Todas":
         vista_l = vista_l[vista_l["SEGMENT"] == {v: k for k, v in PLURAL.items()}[filtro]]
-
+ 
     tabla_l = pd.DataFrame({
         "ID": vista_l["CUSTOMERID"],
         "Tienda": vista_l["BUSINESSNAME"],
@@ -902,7 +935,7 @@ with tab_lista:
         st.dataframe(vista_l[["CUSTOMERID", "BUSINESSNAME", "SEGMENT", "PROB_MAX"] + VARS], hide_index=True, width="stretch")
     st.download_button("Descargar lista de trabajo (CSV)", tabla_l.to_csv(index=False).encode("utf-8-sig"),
                        file_name="lista_de_trabajo.csv", mime="text/csv")
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 5. Radar de perfiles
 # ──────────────────────────────────────────────────────────────
@@ -910,15 +943,15 @@ with tab_radar:
     st.subheader("¿Cómo se comporta cada nivel en Tuali?")
     st.write("Cada eje está escalado de 0 (mínimo de toda la base) a 1 (máximo), para poder comparar variables "
              "con unidades distintas. Puedes superponer un cliente específico.")
-
+ 
     perfiles_real = dff.groupby("SEGMENT")[VARS].mean().reindex(ORDEN).dropna()
     perfiles_norm = normalizar(perfiles_real, df)
-
+ 
     col_a, col_b = st.columns([2.2, 1])
     with col_b:
         segs = st.multiselect("Niveles a mostrar", ORDEN, default=list(perfiles_norm.index))
         cliente_sel = st.selectbox("Superponer cliente (opcional)", ["—"] + dff["CLIENTE"].tolist(), key="radar_cliente")
-
+ 
     perfiles = {s: perfiles_norm.loc[s] for s in segs if s in perfiles_norm.index}
     if cliente_sel != "—":
         fila = dff[dff["CLIENTE"] == cliente_sel]
@@ -928,11 +961,11 @@ with tab_radar:
             html(f"<div style='display:flex;gap:12px;align-items:center'>{tienda_svg(COLORES[rr['SEGMENT']], 60)}"
                  f"<div><b>{rr['BUSINESSNAME']}</b><br>{rr['SEGMENT']} · {rr['PROB_MAX']:.1%} de probabilidad<br>"
                  f"<span style='opacity:.7'>{rr['SUBCHANNEL']} · {rr['CUSTOMERSIZE']} · {rr['STATE']}</span></div></div>")
-
+ 
     with col_a:
         with st.container(border=True):
             st.plotly_chart(radar(perfiles), width="stretch")
-
+ 
     st.markdown("**Promedios reales por nivel**")
     tabla = perfiles_real.copy()
     tabla["COUPLED"] = dff.groupby("SEGMENT")["COUPLED"].mean()
@@ -954,9 +987,9 @@ with tab_sim:
     st.subheader("¿Qué necesita cambiar una tienda para subir de nivel?")
     st.write("Elige un punto de partida y mueve las variables. El modelo (el mismo PCA + GMM del notebook) "
              "recalcula en vivo la probabilidad de pertenecer a cada nivel.")
-
+ 
     puntos_partida = [f"Promedio {s}" for s in ORDEN] + df["CLIENTE"].tolist()
-
+ 
     def cargar_punto_partida():
         sel = st.session_state["sim_base"]
         if sel.startswith("Promedio "):
@@ -965,16 +998,16 @@ with tab_sim:
             base = df[df["CLIENTE"] == sel][VARS].iloc[0]
         for v in VARS:
             st.session_state[f"sim_{v}"] = int(round(base[v])) if v in VARS_ENTERAS else float(base[v])
-
+ 
     if "sim_base" not in st.session_state:
         st.session_state["sim_base"] = "Promedio Dependiente"
         cargar_punto_partida()
-
+ 
     sb1, sb2 = st.columns([3, 1])
     sb1.selectbox("Punto de partida", puntos_partida, key="sim_base", on_change=cargar_punto_partida)
     sb2.write("")
     sb2.button("↺ Restablecer valores", on_click=cargar_punto_partida, key="reset_simulador", width="stretch")
-
+ 
     col_s, col_r = st.columns([1, 1.3])
     valores = {}
     with col_s:
@@ -987,10 +1020,10 @@ with tab_sim:
                     valores[v] = st.slider(NOMBRES[v], 0.0, 1.0, step=0.01, key=f"sim_{v}", format="%.2f")
                 else:
                     valores[v] = st.slider(NOMBRES[v], float(mn), float(mx), step=10.0, key=f"sim_{v}", format="%.0f")
-
+ 
     proba_sim = predecir(modelo, valores)
     nivel_sim = proba_sim.idxmax()
-
+ 
     with col_r:
         html(
             f"<div class='card' style='border-top:6px solid {COLORES[nivel_sim]};align-items:center'>"
@@ -1004,15 +1037,15 @@ with tab_sim:
         fig.update_layout(showlegend=False, xaxis=dict(range=[0, 1], tickformat=".0%"), height=180,
                           yaxis=dict(autorange="reversed"), margin=dict(t=10, b=10))
         st.plotly_chart(fig, width="stretch")
-
+ 
         if proba_sim.max() < 0.70:
             st.warning("Probabilidad máxima menor a 70%: esta tienda estaría **en transición** entre niveles.")
-
+ 
         sim_norm = normalizar(pd.DataFrame([valores]), df).iloc[0]
         perfiles_sim = {s: normalizar(df[df["SEGMENT"] == s][VARS].mean().to_frame().T, df).iloc[0] for s in ORDEN}
         perfiles_sim["Tienda simulada"] = sim_norm
         st.plotly_chart(radar(perfiles_sim), width="stretch")
-
+ 
 # ──────────────────────────────────────────────────────────────
 # 7. Escenarios e impacto
 # ──────────────────────────────────────────────────────────────
@@ -1020,7 +1053,7 @@ with tab_esc:
     st.subheader("Simulador de impacto")
     st.write("Horas de preventista que se liberan al dejar de capturar pedidos en tiendas autónomas, y cuántas "
              "tiendas en transición se podrían acompañar con ese tiempo.")
-
+ 
     n_aut_v = int(conteo["Autónomo"])
     n_semi_v = int(conteo["Semi autónomo"])
     IMPACTO_INICIAL = {"imp_visitas": 16.5, "imp_minutos": 33.4, "imp_reduccion": 50, "imp_suben": 20}
@@ -1036,13 +1069,13 @@ with tab_esc:
         i5.button("↺ Restablecer valores", on_click=restablecer, args=(IMPACTO_INICIAL,), key="reset_impacto",
                   width="stretch")
         st.caption("Valores iniciales tomados del análisis con datos 2025. Ajústalos para probar escenarios.")
-
+ 
     horas_hoy = n_aut_v * visitas_ano * min_visita / 60
     horas_lib = horas_hoy * reduccion / 100
     jornadas = horas_lib / 8
     fte = jornadas / 264
     tiendas_suben = round(n_semi_v * suben / 100)
-
+ 
     j1, j2, j3, j4 = st.columns(4)
     tarjeta(j1, "⏱️ Horas al año hoy en autónomos", f"{horas_hoy:,.0f} h",
             f"{n_aut_v} tiendas × {visitas_ano} visitas × {min_visita} min ÷ 60")
@@ -1052,7 +1085,7 @@ with tab_esc:
             COLORES["Autónomo"])
     tarjeta(j4, "⬆️ Tiendas que suben", f"{tiendas_suben}", f"{n_semi_v} semi autónomas × {suben}%",
             COLORES["Semi autónomo"], tienda_svg(COLORES["Semi autónomo"], 44))
-
+ 
     # Gráfica de cascada: de horas actuales a horas liberadas
     with st.container(border=True):
         st.markdown("**¿A dónde se va el tiempo del preventista en tiendas autónomas?**")
@@ -1063,16 +1096,16 @@ with tab_esc:
         ))
         fig.update_layout(height=200, margin=dict(t=10, b=10), xaxis_title="Horas al año")
         st.plotly_chart(fig, width="stretch")
-
+ 
     st.divider()
-
+ 
     st.subheader("¿Qué pasa si movemos tiendas de nivel?")
     if not HAY_ACOPLE:
         st.info("Este escenario usa la columna COUPLED (pedidos pegados a la visita) y tu base no la trae.")
         st.stop()  # es la última sección del dashboard, así que no corta nada más
     st.write("Define qué porcentaje de cada nivel logra subir uno con las estrategias de adopción. "
              "El impacto se estima con el acoplamiento promedio observado en cada nivel.")
-
+ 
     ESCENARIO_INICIAL = {"esc_dep": 30, "esc_semi": 20, "esc_pedidos": 4}
     iniciar(ESCENARIO_INICIAL)
     with st.container(border=True):
@@ -1083,7 +1116,7 @@ with tab_esc:
         e4.write("")
         e4.button("↺ Restablecer valores", on_click=restablecer, args=(ESCENARIO_INICIAL,), key="reset_escenario",
                   width="stretch")
-
+ 
     acople = dff.groupby("SEGMENT")["COUPLED"].mean().reindex(ORDEN).fillna(df.groupby("SEGMENT")["COUPLED"].mean())
     actual = conteo.astype(float)
     pasan_dep = actual["Dependiente"] * mig_dep / 100
@@ -1096,7 +1129,7 @@ with tab_esc:
     acople_actual = (actual * acople).sum() / actual.sum()
     acople_nuevo = (nuevo * acople).sum() / nuevo.sum()
     pedidos_liberados = (acople_actual - acople_nuevo) * actual.sum() * pedidos_mes
-
+ 
     m1, m2, m3, m4 = st.columns(4)
     tarjeta(m1, "Tiendas que suben de nivel", f"{pasan_dep + pasan_semi:,.0f}", "Con las estrategias de adopción",
             COLORES["Autónomo"], tienda_svg(COLORES["Autónomo"], 44))
@@ -1105,7 +1138,7 @@ with tab_esc:
     tarjeta(m3, "Pedidos pegados a visita", f"{acople_nuevo:.1%}",
             f"{(acople_nuevo - acople_actual) * 100:+.1f} pp vs. hoy", COLORES["Semi autónomo"])
     tarjeta(m4, "Pedidos/mes sin depender de visita", f"+{pedidos_liberados:,.0f}", f"Supuesto: {pedidos_mes} pedidos por tienda")
-
+ 
     with st.container(border=True):
         c_a, c_b = st.columns(2)
         for col, titulo, serie in [(c_a, "Hoy", actual), (c_b, "Escenario", nuevo)]:
@@ -1113,4 +1146,3 @@ with tab_esc:
                 st.markdown(f"**{titulo}: de cada 100 tiendas…**")
                 iconos = "".join(tienda_svg(COLORES[s], 30) for s in cien_tiendas(serie.round().astype(int)))
                 html(f"<div class='waffle'>{iconos}</div>")
-
