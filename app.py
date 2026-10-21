@@ -9,6 +9,7 @@ La base de datos (Excel o CSV) se sube desde la barra lateral.
 """
 
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -180,6 +181,18 @@ def medidor(valor: float, cortes: tuple, titulo: str = "", alto: int = 230) -> g
                        font=dict(size=44 if alto >= 260 else 34, family="Fraunces, serif", color=TINTA))
     fig.update_layout(height=alto, margin=dict(t=40, b=10, l=30, r=30))
     return fig
+
+
+def restablecer(valores: dict):
+    """Regresa los controles a su valor inicial (se usa en los botones ↺ Restablecer)."""
+    for clave, valor in valores.items():
+        st.session_state[clave] = valor
+
+
+def iniciar(valores: dict):
+    """Pone el valor inicial de cada control solo la primera vez."""
+    for clave, valor in valores.items():
+        st.session_state.setdefault(clave, valor)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -441,20 +454,6 @@ def resumen_rutas(d: pd.DataFrame) -> pd.DataFrame:
     return r.sort_values("Dependientes", ascending=False)
 
 
-def rutas_recomendadas(d: pd.DataFrame, capacidad: int) -> pd.DataFrame:
-    """Reorganiza cada CEDIS: autónomos → 1 ruta digital; semi y dependientes → rutas presenciales
-    de 'capacidad' clientes, agrupados por barrido angular alrededor del CEDIS (sweep)."""
-    d = d.copy()
-    d["ANG"] = np.arctan2(d["LAT"] - d["CEDIS_LAT"], d["LON"] - d["CEDIS_LON"])
-    d["RUTA_REC"] = ""
-    for cedis, g in d.groupby("CEDISID"):
-        d.loc[g.index[g["SEGMENT"] == "Autónomo"], "RUTA_REC"] = f"{cedis} · Digital"
-        presenciales = g[g["SEGMENT"] != "Autónomo"].sort_values("ANG").index
-        for k, i in enumerate(range(0, len(presenciales), capacidad)):
-            d.loc[presenciales[i:i + capacidad], "RUTA_REC"] = f"{cedis} · P{k + 1}"
-    return d
-
-
 def mapa_rutas(d: pd.DataFrame, col_ruta: str) -> go.Figure:
     """Dibuja cada ruta como recorrido CEDIS → clientes → CEDIS (rutas digitales solo como puntos)."""
     d = d.copy()
@@ -565,6 +564,11 @@ COLUMNAS_AYUDA = (
     + "\n\nLos niveles de autonomía y su probabilidad se calculan automáticamente con PCA + GMM."
 )
 
+# Botón para descargar la guía en PDF (el archivo va en la misma carpeta que app.py)
+GUIA_PDF = Path(__file__).parent / "Guia_Radar_Autonomia_Tuali.pdf"
+if GUIA_PDF.exists():
+    st.sidebar.download_button("📖 Descargar guía del dashboard (PDF)", data=GUIA_PDF.read_bytes(),
+                               file_name=GUIA_PDF.name, mime="application/pdf", width="stretch", type="primary")
 st.sidebar.header("Datos")
 subido = st.sidebar.file_uploader("Sube tu base de datos (Excel o CSV)", type=["xlsx", "csv"])
 if subido is None:
@@ -613,10 +617,12 @@ CORTES = ((_m["Dependiente"] + _m["Semi autónomo"]) / 2, (_m["Semi autónomo"] 
 # Filtros
 # ──────────────────────────────────────────────────────────────
 st.sidebar.header("Filtros")
+FILTROS_INICIALES = {f"filtro_{col}": [] for col in DIMENSIONES.values()}
+st.sidebar.button("↺ Restablecer filtros", on_click=restablecer, args=(FILTROS_INICIALES,), width="stretch")
 filtros = {}
 for etiqueta, col in DIMENSIONES.items():
     opciones = sorted(df[col].dropna().unique())
-    filtros[col] = st.sidebar.multiselect(etiqueta, opciones, placeholder="Todos")
+    filtros[col] = st.sidebar.multiselect(etiqueta, opciones, placeholder="Todos", key=f"filtro_{col}")
 
 dff = df.copy()
 for col, seleccion in filtros.items():
@@ -784,57 +790,21 @@ with tab_mapa:
         width="stretch", hide_index=True, height=320,
     )
 
-    st.subheader("Rutas recomendadas")
-    st.write(
-        "Propuesta: en cada CEDIS, los **autónomos** pasan a una ruta **digital** (piden por Tuali y se visitan "
-        "con menos frecuencia), y los **semi autónomos y dependientes** se reagrupan en rutas presenciales por cercanía."
-    )
-    q1, q2 = st.columns(2)
-    capacidad = q1.slider("Clientes por ruta presencial", 4, 20, 8)
-    semanas_aut = q2.slider("Autónomos: una visita cada … semanas", 1, 8, 4)
-
-    rec = rutas_recomendadas(dff, capacidad)
-    n_aut = (rec["SEGMENT"] == "Autónomo").sum()
-    rutas_pres_rec = rec.loc[~rec["RUTA_REC"].str.endswith("Digital"), "RUTA_REC"].nunique()
-    rutas_hoy = dff["ROUTEID"].nunique()
-    visitas_actual = len(rec)  # supuesto: hoy cada cliente se visita 1 vez por semana
-    visitas_rec = (len(rec) - n_aut) + n_aut / semanas_aut
-
-    r1, r2, r3, r4 = st.columns(4)
-    tarjeta(r1, "Rutas presenciales", rutas_pres_rec, f"{rutas_pres_rec - rutas_hoy:+d} vs. hoy ({rutas_hoy})", ROJO_ARCA)
-    tarjeta(r2, "Rutas digitales", rec.loc[rec["RUTA_REC"].str.endswith("Digital"), "RUTA_REC"].nunique(),
-            f"{n_aut} clientes autónomos", COLORES["Autónomo"], tienda_svg(COLORES["Autónomo"], 50))
-    tarjeta(r3, "Visitas por semana", f"{visitas_rec:,.0f}", f"{visitas_rec - visitas_actual:+,.0f} vs. hoy ({visitas_actual})")
-    tarjeta(r4, "Ahorro de visitas", f"{1 - visitas_rec / visitas_actual:.0%}", "Supuesto: hoy 1 visita por semana",
-            COLORES["Autónomo"])
-
     with st.container(border=True):
         st.markdown("**Ver rutas en el mapa**")
-        m1, m2 = st.columns([1, 1])
-        cedis_sel = m1.selectbox("CEDIS", sorted(dff["CEDISID"].unique()), key="mapa_cedis")
-        vista = m2.radio("Mostrar", ["Rutas actuales", "Rutas recomendadas"], horizontal=True, key="mapa_vista")
-
-        d_cedis = rec[rec["CEDISID"] == cedis_sel]
-        col_ruta = "ROUTEID" if vista == "Rutas actuales" else "RUTA_REC"
+        cedis_sel = st.selectbox("CEDIS", sorted(dff["CEDISID"].unique()), key="mapa_cedis")
+        d_cedis = dff[dff["CEDISID"] == cedis_sel]
         c_map, c_tab = st.columns([1.6, 1])
         with c_map:
-            st.plotly_chart(mapa_rutas(d_cedis, col_ruta), width="stretch")
+            st.plotly_chart(mapa_rutas(d_cedis, "ROUTEID"), width="stretch")
         with c_tab:
-            detalle = (d_cedis.groupby(col_ruta)["SEGMENT"].value_counts().unstack(fill_value=0)
+            detalle = (d_cedis.groupby("ROUTEID")["SEGMENT"].value_counts().unstack(fill_value=0)
                        .reindex(columns=ORDEN, fill_value=0))
             detalle["Total"] = detalle.sum(axis=1)
-            st.markdown(f"**{vista} en {cedis_sel}**")
+            st.markdown(f"**Rutas en {cedis_sel}**")
             st.dataframe(detalle, width="stretch")
             st.caption("Los puntos se colorean por nivel; las líneas muestran el recorrido CEDIS → clientes → CEDIS, "
                        "visitando siempre al cliente más cercano.")
-
-    st.download_button(
-        "Descargar asignación de rutas recomendadas (CSV)",
-        rec[["CUSTOMERID", "BUSINESSNAME", "SEGMENT", "CEDISID", "ROUTEID", "RUTA_REC"]]
-        .rename(columns={"ROUTEID": "RUTA_ACTUAL", "RUTA_REC": "RUTA_RECOMENDADA"})
-        .to_csv(index=False).encode("utf-8-sig"),
-        file_name="rutas_recomendadas.csv", mime="text/csv",
-    )
 
 # ──────────────────────────────────────────────────────────────
 # 3. Ficha del cliente
@@ -1016,10 +986,6 @@ with tab_radar:
         }),
         width="stretch",
     )
-    st.info("**Lectura rápida:** los autónomos usan más promociones y favoritos, compran más variedad y casi no "
-            "buscan por código; los dependientes buscan todo por código, tienen sesiones cortas y piden más "
-            "acompañados del preventista.")
-
 # ──────────────────────────────────────────────────────────────
 # 6. Simulador de cliente (what-if con el GMM)
 # ──────────────────────────────────────────────────────────────
@@ -1043,7 +1009,10 @@ with tab_sim:
         st.session_state["sim_base"] = "Promedio Dependiente"
         cargar_punto_partida()
 
-    st.selectbox("Punto de partida", puntos_partida, key="sim_base", on_change=cargar_punto_partida)
+    sb1, sb2 = st.columns([3, 1])
+    sb1.selectbox("Punto de partida", puntos_partida, key="sim_base", on_change=cargar_punto_partida)
+    sb2.write("")
+    sb2.button("↺ Restablecer valores", on_click=cargar_punto_partida, key="reset_simulador", width="stretch")
 
     col_s, col_r = st.columns([1, 1.3])
     valores = {}
@@ -1093,12 +1062,18 @@ with tab_esc:
 
     n_aut_v = int(conteo["Autónomo"])
     n_semi_v = int(conteo["Semi autónomo"])
+    IMPACTO_INICIAL = {"imp_visitas": 16.5, "imp_minutos": 33.4, "imp_reduccion": 50, "imp_suben": 20}
+    iniciar(IMPACTO_INICIAL)
     with st.container(border=True):
         i1, i2, i3 = st.columns(3)
-        visitas_ano = i1.slider("Visitas al año por tienda autónoma", 4.0, 52.0, 16.5, 0.5)
-        min_visita = i2.slider("Minutos por visita", 10.0, 60.0, 33.4, 0.1)
-        reduccion = i3.slider("Reducción de visitas de captura (%)", 0, 100, 50, 5)
-        suben = st.slider("Tiendas semi autónomas que suben de nivel (%)", 0, 100, 20, 5)
+        visitas_ano = i1.slider("Visitas al año por tienda autónoma", 4.0, 52.0, step=0.5, key="imp_visitas")
+        min_visita = i2.slider("Minutos por visita", 10.0, 60.0, step=0.1, key="imp_minutos")
+        reduccion = i3.slider("Reducción de visitas de captura (%)", 0, 100, step=5, key="imp_reduccion")
+        i4, i5 = st.columns([3, 1])
+        suben = i4.slider("Tiendas semi autónomas que suben de nivel (%)", 0, 100, step=5, key="imp_suben")
+        i5.write("")
+        i5.button("↺ Restablecer valores", on_click=restablecer, args=(IMPACTO_INICIAL,), key="reset_impacto",
+                  width="stretch")
         st.caption("Valores iniciales tomados del análisis con datos 2025. Ajústalos para probar escenarios.")
 
     horas_hoy = n_aut_v * visitas_ano * min_visita / 60
@@ -1137,10 +1112,16 @@ with tab_esc:
     st.write("Define qué porcentaje de cada nivel logra subir uno con las estrategias de adopción. "
              "El impacto se estima con el acoplamiento promedio observado en cada nivel.")
 
-    e1, e2, e3 = st.columns(3)
-    mig_dep = e1.slider("Dependientes que pasan a Semi autónomo (%)", 0, 100, 30, step=5)
-    mig_semi = e2.slider("Semi autónomos que pasan a Autónomo (%)", 0, 100, 20, step=5)
-    pedidos_mes = e3.number_input("Pedidos por cliente al mes (supuesto)", min_value=1, max_value=60, value=4)
+    ESCENARIO_INICIAL = {"esc_dep": 30, "esc_semi": 20, "esc_pedidos": 4}
+    iniciar(ESCENARIO_INICIAL)
+    with st.container(border=True):
+        e1, e2, e3, e4 = st.columns([1.2, 1.2, 1, 0.8])
+        mig_dep = e1.slider("Dependientes que pasan a Semi autónomo (%)", 0, 100, step=5, key="esc_dep")
+        mig_semi = e2.slider("Semi autónomos que pasan a Autónomo (%)", 0, 100, step=5, key="esc_semi")
+        pedidos_mes = e3.number_input("Pedidos por cliente al mes (supuesto)", min_value=1, max_value=60, key="esc_pedidos")
+        e4.write("")
+        e4.button("↺ Restablecer valores", on_click=restablecer, args=(ESCENARIO_INICIAL,), key="reset_escenario",
+                  width="stretch")
 
     acople = dff.groupby("SEGMENT")["COUPLED"].mean().reindex(ORDEN).fillna(df.groupby("SEGMENT")["COUPLED"].mean())
     actual = conteo.astype(float)
@@ -1171,3 +1152,4 @@ with tab_esc:
                 st.markdown(f"**{titulo}: de cada 100 tiendas…**")
                 iconos = "".join(tienda_svg(COLORES[s], 30) for s in cien_tiendas(serie.round().astype(int)))
                 html(f"<div class='waffle'>{iconos}</div>")
+
