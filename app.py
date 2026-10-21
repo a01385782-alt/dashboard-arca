@@ -1,4 +1,3 @@
-App · PY
 """
 Radar de Autonomía Tuali · Arca Continental · Equipo 5
 Niveles de autonomía digital con PCA + GMM
