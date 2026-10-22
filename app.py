@@ -1,3 +1,4 @@
+
 """
 Radar de Autonomía Tuali · Arca Continental · Equipo 5
 Niveles de autonomía digital con PCA + GMM
@@ -1142,8 +1143,27 @@ with tab_esc:
  
     with st.container(border=True):
         c_a, c_b = st.columns(2)
+        # Cuántas de las 100 tiendas son de cada nivel, hoy y en el escenario (cambia con los sliders)
+        hoy_100 = pd.Series(cien_tiendas(actual)).value_counts().reindex(ORDEN, fill_value=0)
         for col, titulo, serie in [(c_a, "Hoy", actual), (c_b, "Escenario", nuevo)]:
             with col:
                 st.markdown(f"**{titulo}: de cada 100 tiendas…**")
-                iconos = "".join(tienda_svg(COLORES[s], 30) for s in cien_tiendas(serie.round().astype(int)))
-                html(f"<div class='waffle'>{iconos}</div>")
+                lista_100 = cien_tiendas(serie)
+                n100 = pd.Series(lista_100).value_counts().reindex(ORDEN, fill_value=0)
+                iconos = "".join(tienda_svg(COLORES[s], 30) for s in lista_100)
+                leyenda = ""
+                for s in ORDEN:
+                    cambio = int(n100[s] - hoy_100[s])
+                    cambio_txt = ""
+                    if titulo == "Escenario" and cambio != 0:
+                        # Verde = mejora (más autónomos o menos dependientes); gris = semi autónomos (cambio neutro)
+                        if s == "Semi autónomo":
+                            color_cambio = "#6b5e52"
+                        elif (s == "Autónomo") == (cambio > 0):
+                            color_cambio = COLORES["Autónomo"]
+                        else:
+                            color_cambio = COLORES["Dependiente"]
+                        cambio_txt = f"<span style='color:{color_cambio};font-weight:700'>&nbsp;({cambio:+d})</span>"
+                    leyenda += (f"<span>{tienda_svg(COLORES[s], 22)} <b style='font-size:1.15rem'>{n100[s]}</b>"
+                                f"&nbsp;{PLURAL[s].lower()}{cambio_txt}</span>")
+                html(f"<div class='waffle'>{iconos}</div><div class='leyenda'>{leyenda}</div>")
