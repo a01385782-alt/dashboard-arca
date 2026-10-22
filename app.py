@@ -1,4 +1,3 @@
-
 """
 Radar de Autonomía Tuali · Arca Continental · Equipo 5
 Niveles de autonomía digital con PCA + GMM
@@ -296,8 +295,10 @@ def entrenar_modelo(df: pd.DataFrame):
         "prob_max": gmm.predict_proba(X).max(axis=1),
         "componentes": X,
         "var_explicada": pca.explained_variance_ratio_,
-        # Peso de cada variable en el IAD = carga al cuadrado en el primer componente (suman 1)
-        "pesos": pd.Series(pca.components_[0] ** 2, index=VARS),
+        # Peso de cada variable en el IAD: usa los 3 componentes del PCA.
+        # peso_v = Σ_k (varianza explicada_k × carga_kv²), normalizado para que sumen 1.
+        "pesos": (lambda w: w / w.sum())(pd.Series(
+            (pca.components_ ** 2 * pca.explained_variance_ratio_[:, None]).sum(axis=0), index=VARS)),
     }
  
  
@@ -311,7 +312,7 @@ def predecir(modelo, valores: dict) -> pd.Series:
  
  
 @st.cache_data
-def calcular_indices(df: pd.DataFrame, _pesos: pd.Series) -> pd.DataFrame:
+def calcular_indices(df: pd.DataFrame, pesos: pd.Series) -> pd.DataFrame:
     """Puntaje 0–10 por variable (percentil, orientado para que más alto = más autónomo)
     e IAD (Índice de Autonomía Digital) = promedio ponderado con los pesos del PCA."""
     df = df.copy()
@@ -319,7 +320,7 @@ def calcular_indices(df: pd.DataFrame, _pesos: pd.Series) -> pd.DataFrame:
     for v in VARS:
         signo = 1 if medias.loc["Autónomo", v] >= medias.loc["Dependiente", v] else -1
         df[f"P_{v}"] = (signo * df[v]).rank(pct=True) * 10
-    df["IAD"] = sum(df[f"P_{v}"] * _pesos[v] for v in VARS)
+    df["IAD"] = sum(df[f"P_{v}"] * pesos[v] for v in VARS)
     return df
  
  
